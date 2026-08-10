@@ -628,8 +628,6 @@
       </div>`;
   }
 
-  const canEdit = (t) => state.user.role === "admin" || t.assigned_to === state.user.username || t.assigned_by === state.user.username;
-
   function dueCell(due, status) {
     if (!due) return '<span style="color:var(--muted)">—</span>';
     const overdue = isOverdue(due) && status !== "Completed";
@@ -962,7 +960,7 @@
       <div class="card table-wrap">
         <table class="data-table">
           <thead><tr>
-            <th>Member</th><th>Date</th><th>Task</th><th>Description</th><th>Domain</th><th>Hours</th><th></th>
+            <th>Member</th><th>Date</th><th>Task</th><th>Description</th><th>Task Type</th><th>Hours</th><th></th>
           </tr></thead>
           <tbody>
             ${rows

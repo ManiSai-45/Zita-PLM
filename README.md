@@ -8,14 +8,14 @@ Internal Project Management & Timesheet tool.
 
 ## Features
 
-- **Admin role** (`ADMIN` / `ADMIN123`) — create users, delete users, reset passwords, assign tasks, view everyone's timesheets, see everything.
-- **User role** — can create tasks (auto or manual task ID) and assign them to a responsible person, edit only their own tasks (completion status), and view everyone else's tasks in read-only mode.
+- **Admin role** (`ADMIN` / `ADMIN123`) — create users, delete users, reset passwords, assign tasks, full edit on every task, view everyone's timesheets (monitor mode), see everything.
+- **User role** — can create tasks (auto or manual task ID) and assign them to a responsible person. On their own/assigned tasks, users can **only change status and add comments**; they cannot edit title, description, priority, assignee, due date, task type, etc. Other members' tasks are read-only.
 - **Tasks tab** with two views:
-  - **My work** — kanban board of tasks assigned to / created by you. Click a card to open detail and change status (card auto-moves to its new column).
-  - **Overall** — every member's tasks with filters (search, status, priority, assignee, due-date range).
-- **Task ID** — auto-populated with the next available number, editable on create/edit (duplicates rejected).
-- **Excel export** — export tasks, timesheets and members to `.xlsx` from every screen.
-- **Timesheets tab** — log daily hours (task, description, date, hours, domain) with filters and admin-only visibility of all members' records.
+  - **My work** — kanban board of tasks assigned to / created by you. Open a card → change status (card auto-moves) or add a comment.
+  - **Overall** — for users this is **read-only**; admins get full edit. Filters: search, status, priority, task type, assignee, due-date range.
+- **Task columns** — Task ID (auto next number, editable), Title, Task Type, Client, Status, % Complete, Priority, Assignee, Assigned By/Date (auto-populated), Due Date, Duration (auto), Dependencies, Risk/Blockers, Comments (thread with author+date stamps).
+- **Excel export** — exports include every task column; timesheets and members also exportable from each screen.
+- **Timesheets tab** — members log daily hours (task, description, date, hours, task type); **admins monitor all members** (no entry form, no logging).
 - **Dashboard** — stat cards + charts (tasks by status, hours by member).
 - **Team** — member directory; admins manage accounts.
 
