@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ZITA PLM
 
 Internal Project Management & Timesheet tool.
@@ -102,3 +103,7 @@ Notes:
 - Deploys from the `main` branch happen automatically on every push (`autoDeploy: true`).
 - Free Render web services spin down after ~15 min idle; the first request after that takes ~30–60 s to wake up. A cron ping (e.g. UptimeRobot free) keeps it warm.
 - Only `PORT` is provided by Render (see `server.js`); everything else comes from your env vars.
+=======
+# Zita-PLM
+This repository for PLM Application
+>>>>>>> ccac1d120e13171993bb9a7113d36346ecd39c57
