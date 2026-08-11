@@ -12,6 +12,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const TOKEN_SECRET = process.env.TOKEN_SECRET || "dev-secret";
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const DEFAULT_PASSWORD = "Welcome";
 
 /* ------------------------------ auth helpers ------------------------------ */
 
@@ -82,7 +83,11 @@ app.post(
     if (!row || !verifyPassword(password, row.password_hash)) {
       return res.status(401).json({ error: "Invalid username or password" });
     }
-    const user = { username: row.username, name: row.name, role: row.role };
+    const user = { username: row.username, name: row.name, role: row.role, must_change_password: row.must_change_password };
+    if (row.must_change_password) {
+      const check = verifyPassword(DEFAULT_PASSWORD, row.password_hash);
+      user.using_default_password = check;
+    }
     res.json({ token: signToken(user), user });
   })
 );
@@ -99,7 +104,7 @@ app.get(
   "/api/users",
   auth(),
   asyncWrap(async (req, res) => {
-    const r = await query("SELECT username, name, role, created_at FROM app_users ORDER BY name");
+    const r = await query("SELECT username, name, role, must_change_password, created_at FROM app_users ORDER BY name");
     res.json(r.rows);
   })
 );
@@ -108,18 +113,18 @@ app.post(
   "/api/users",
   auth(true),
   asyncWrap(async (req, res) => {
-    const { username, name, role, password } = req.body || {};
-    if (!username || !name || !password) return res.status(400).json({ error: "username, name and password are required" });
+    const { username, name, role } = req.body || {};
+    if (!username || !name) return res.status(400).json({ error: "username and name are required" });
     const uname = String(username).trim().toUpperCase();
     const r = await query("SELECT 1 FROM app_users WHERE username = $1", [uname]);
     if (r.rowCount) return res.status(409).json({ error: "User already exists" });
-    await query("INSERT INTO app_users (username, name, role, password_hash) VALUES ($1,$2,$3,$4)", [
+    await query("INSERT INTO app_users (username, name, role, password_hash, must_change_password) VALUES ($1,$2,$3,$4,TRUE)", [
       uname,
       name.trim(),
       role === "admin" ? "admin" : "user",
-      hashPassword(password),
+      hashPassword(DEFAULT_PASSWORD),
     ]);
-    res.status(201).json({ username: uname, name: name.trim(), role: role === "admin" ? "admin" : "user" });
+    res.status(201).json({ username: uname, name: name.trim(), role: role === "admin" ? "admin" : "user", must_change_password: true });
   })
 );
 
@@ -144,12 +149,42 @@ app.patch(
     const params = [];
     if (name) { params.push(name.trim()); fields.push(`name = $${params.length}`); }
     if (role) { params.push(role === "admin" ? "admin" : "user"); fields.push(`role = $${params.length}`); }
-    if (password) { params.push(hashPassword(password)); fields.push(`password_hash = $${params.length}`); }
+    if (password) {
+      params.push(hashPassword(password));
+      fields.push(`password_hash = $${params.length}`);
+      params.push(true);
+      fields.push(`must_change_password = $${params.length}`);
+    }
     if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
     params.push(uname);
     const r = await query(`UPDATE app_users SET ${fields.join(", ")} WHERE username = $${params.length}`, params);
     if (!r.rowCount) return res.status(404).json({ error: "User not found" });
     res.json({ ok: true });
+  })
+);
+
+// change my own password (used on first sign-in with the default password)
+app.post(
+  "/api/me/password",
+  auth(),
+  asyncWrap(async (req, res) => {
+    const { current_password, new_password } = req.body || {};
+    if (!current_password || !new_password) {
+      return res.status(400).json({ error: "Current and new password are required" });
+    }
+    if (String(new_password).length < 6) {
+      return res.status(400).json({ error: "New password must be at least 6 characters" });
+    }
+    const row = await query("SELECT * FROM app_users WHERE username = $1", [req.user.username]);
+    if (!row.rowCount || !verifyPassword(current_password, row.rows[0].password_hash)) {
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+    await query("UPDATE app_users SET password_hash = $1, must_change_password = FALSE WHERE username = $2", [
+      hashPassword(new_password),
+      req.user.username,
+    ]);
+    const user = { username: req.user.username, name: req.user.name, role: req.user.role, must_change_password: false };
+    res.json({ ok: true, user });
   })
 );
 
@@ -223,8 +258,8 @@ app.post(
     const due = b.due_date || null;
     const r = await query(
       `INSERT INTO tasks (task_code, title, description, client, task_type, priority, status, percent_complete,
-                          due_date, duration, dependencies, risk_blockers, assigned_to, assigned_by, assigned_at, comments)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+                          due_date, duration, dependencies, risk_blockers, assigned_to, assigned_by, created_by, assigned_at, comments)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
       [
         code,
         String(b.title).trim(),
@@ -239,6 +274,7 @@ app.post(
         b.dependencies || "",
         b.risk_blockers || "",
         b.assigned_to ? String(b.assigned_to).toUpperCase() : null,
+        req.user.username,
         req.user.username,
         today,
         b.comments || "",
@@ -258,17 +294,18 @@ app.patch(
     if (!task) return res.status(404).json({ error: "Task not found" });
 
     const isAdmin = req.user.role === "admin";
-    const isOwner =
-      (task.assigned_to && task.assigned_to === req.user.username) ||
-      (task.assigned_by && task.assigned_by === req.user.username);
-    if (!isAdmin && !isOwner) return res.status(403).json({ error: "You can only act on tasks assigned to you" });
+    const isCreator = task.created_by === req.user.username;
+    const isAssignee = task.assigned_to === req.user.username;
+    if (!isAdmin && !isCreator && !isAssignee) {
+      return res.status(403).json({ error: "You can only act on tasks you created or that are assigned to you" });
+    }
 
     const b = req.body || {};
 
-    if (!isAdmin) {
+    if (!isAdmin && !isCreator) {
       const allowedUserKeys = Object.keys(b).filter((k) => k !== "status" && k !== "comment");
       if (allowedUserKeys.length) {
-        return res.status(403).json({ error: "Users can only change status or add comments on tasks" });
+        return res.status(403).json({ error: "Only the task creator (or admin) can edit task details" });
       }
     }
 
@@ -286,7 +323,7 @@ app.patch(
       newComments = (task.comments || "").trimEnd();
       newComments = newComments ? newComments + "\n\n" + stamp + " " + text : stamp + " " + text;
     }
-    if (isAdmin && "comments" in b) {
+    if ((isAdmin || isCreator) && "comments" in b) {
       newComments = String(b.comments || "");
     }
 
@@ -351,8 +388,8 @@ app.delete(
     const t = await query("SELECT * FROM tasks WHERE id = $1", [id]);
     const task = t.rows[0];
     if (!task) return res.status(404).json({ error: "Task not found" });
-    if (req.user.role !== "admin" && task.assigned_by !== req.user.username) {
-      return res.status(403).json({ error: "Only admin or the user who created/assigned this task can delete it" });
+    if (req.user.role !== "admin" && task.created_by !== req.user.username) {
+      return res.status(403).json({ error: "Only admin or the user who created this task can delete it" });
     }
     await query("DELETE FROM tasks WHERE id = $1", [id]);
     res.json({ ok: true });
