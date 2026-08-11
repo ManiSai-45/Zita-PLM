@@ -206,6 +206,11 @@
       window.location.href = "index.html";
       return;
     }
+    if (state.user.must_change_password) {
+      localStorage.clear();
+      window.location.href = "index.html";
+      return;
+    }
     $("#sideUserName").textContent = state.user.name;
     $("#sideUserRole").textContent = "Admin" === state.user.role ? "Administrator" : state.user.role;
     $("#sideAvatar").textContent = initials(state.user.name);
@@ -504,7 +509,7 @@
 
     if (state.taskView === "mine") {
       const mine = tasks.filter(
-        (t) => (t.assigned_to === state.user.username) || (t.assigned_by === state.user.username)
+        (t) => (t.assigned_to === state.user.username) || (t.created_by === state.user.username)
       );
       state.exportTasks = mine;
       view.innerHTML =
@@ -585,7 +590,7 @@
   }
 
   function taskTable(tasks) {
-    const canEditAny = state.user.role === "admin";
+    const canAnyEdit = (t) => state.user.role === "admin" || t.created_by === state.user.username;
     return `
       <div class="card table-wrap">
         <table class="data-table">
@@ -597,7 +602,8 @@
           <tbody>
             ${tasks
               .map(
-                (t) => `<tr>
+                (t) => { const edit = canAnyEdit(t);
+                return `<tr>
                   <td>
                     <div><strong>${esc(t.task_code)}</strong> · ${esc(t.title)}</div>
                     ${t.description ? `<div style="font-size:11.5px;color:var(--muted);margin-top:2px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.description)}</div>` : ""}
@@ -617,10 +623,10 @@
                   <td style="max-width:160px"><span style="color:var(--muted)">${t.comments ? esc(t.comments.slice(0, 60).replace(/\n/g, " ")) + (t.comments.length > 60 ? "…" : "") : "—"}</span></td>
                   <td>
                     <div class="row-actions">
-                      <button class="icon-btn" title=${canEditAny ? '"Edit"' : '"View"'} onclick="__plm.${canEditAny ? "openTask" : "viewTask"}(${t.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                      <button class="icon-btn" title=${edit ? '"Edit"' : '"View"'} onclick="__plm.${edit ? "openTask" : "viewTask"}(${t.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
                     </div>
                   </td>
-                </tr>`
+                </tr>`; }
               )
               .join("")}
           </tbody>
@@ -823,8 +829,8 @@
   window.__plm.openTask = (id) => {
     const task = state.tasks.find((t) => t.id === id);
     if (!task) return;
-    if (state.user.role === "admin") return openTaskModal(task);
-    const mine = task.assigned_to === state.user.username || task.assigned_by === state.user.username;
+    if (state.user.role === "admin" || task.created_by === state.user.username) return openTaskModal(task);
+    const mine = task.assigned_to === state.user.username;
     return mine ? renderTaskActions(task) : renderViewOnly(task);
   };
   window.__plm.viewTask = (id) => {
@@ -1007,13 +1013,12 @@
     view.innerHTML = `
       ${isAdmin ? `
         <div class="section-head">
-          <div><h2>Create user</h2><p>New members sign in using the id &amp; password you set.</p></div>
+          <div><h2>Create user</h2><p>New members sign in with their Employee ID and the default password <code>Welcome</code>, then set their own password on first sign-in.</p></div>
         </div>
         <div class="card" style="padding:20px">
           <div class="form-grid">
             <div class="form-field"><label>Employee ID / Username *</label><input class="input" id="nuUser" placeholder="e.g. GANESH"></div>
             <div class="form-field"><label>Full name *</label><input class="input" id="nuName" placeholder="e.g. Ganesh Kamalapuram"></div>
-            <div class="form-field"><label>Password *</label><input class="input" id="nuPass" placeholder="Default password for the user"></div>
             <div class="form-field"><label>Role</label><select class="select" id="nuRole"><option value="user">User</option><option value="admin">Admin</option></select></div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:16px">
@@ -1056,12 +1061,11 @@
       create.addEventListener("click", async () => {
         const username = $("#nuUser").value.trim();
         const name = $("#nuName").value.trim();
-        const password = $("#nuPass").value;
         const role = $("#nuRole").value;
-        if (!username || !name || !password) return toast("Username, name and password are required", "err");
+        if (!username || !name) return toast("Username and name are required", "err");
         try {
-          await api("/api/users", { method: "POST", body: JSON.stringify({ username, name, role, password }) });
-          toast(`User ${username} created`);
+          await api("/api/users", { method: "POST", body: JSON.stringify({ username, name, role }) });
+          toast(`User ${username} created — default password is 'Welcome'`);
           renderTeam();
         } catch (e) {
           toast(e.message, "err");
@@ -1075,25 +1079,20 @@
     const expATS = $("#expAllTs");
     if (expATS) expATS.addEventListener("click", () => { state.exportTimesheets = state.timesheets; exportTimesheetsExcel(); });
 
-    window.__plm.resetPw = (username, name) => {
-      openModal(`
-        <div class="modal-head"><h3>Reset password</h3><button class="modal-x" data-close>✕</button></div>
-        <div class="modal-body">
-          <p style="color:#475569;margin-bottom:14px;font-size:13.5px">Set a new password for <strong>${esc(name)}</strong> (${esc(username)}).</p>
-          <div class="form-field"><label>New password</label><input type="password" class="input" id="rpPass"></div>
-          <div class="modal-foot">
-            <button class="btn btn-ghost" data-close>Cancel</button>
-            <button class="btn btn-primary" id="rpSave">Save</button>
-          </div>
-        </div>`);
-      $("#rpSave").addEventListener("click", async () => {
-        const pw = $("#rpPass").value;
-        if (!pw) return toast("Password cannot be empty", "err");
-        await api("/api/users/" + username, { method: "PATCH", body: JSON.stringify({ password: pw }) });
-        toast("Password updated");
-        closeModal();
+    window.__plm.resetPw = (username, name) =>
+      confirmBox({
+        title: "Reset password",
+        message: `Reset <strong>${esc(name)}</strong> (${esc(username)}) to the default password <strong>Welcome</strong>? They will be asked to set their own password on their next sign-in.`,
+        yes: "Reset to Welcome",
+        cb: async () => {
+          try {
+            await api("/api/users/" + username, { method: "PATCH", body: JSON.stringify({ password: "Welcome" }) });
+            toast("Password reset to 'Welcome'");
+          } catch (e) {
+            toast(e.message, "err");
+          }
+        },
       });
-    };
 
     window.__plm.delUser = (username, name) =>
       confirmBox({

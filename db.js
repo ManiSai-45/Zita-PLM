@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS app_users (
   name         TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   role         TEXT NOT NULL DEFAULT 'user',
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -44,11 +45,16 @@ CREATE TABLE IF NOT EXISTS tasks (
   risk_blockers TEXT DEFAULT '',
   assigned_to  TEXT REFERENCES app_users(username) ON DELETE SET NULL,
   assigned_by  TEXT REFERENCES app_users(username) ON DELETE SET NULL,
+  created_by   TEXT REFERENCES app_users(username) ON DELETE SET NULL,
   assigned_at  DATE,
   comments     TEXT DEFAULT '',
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+DO $$ BEGIN
+  ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+END $$;
 
 -- In-place upgrade for databases created before these columns/renames existed
 DO $$ BEGIN
@@ -71,6 +77,7 @@ DO $$ BEGIN
   ALTER TABLE tasks ADD COLUMN IF NOT EXISTS duration INTEGER;
   ALTER TABLE tasks ADD COLUMN IF NOT EXISTS percent_complete INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE tasks ADD COLUMN IF NOT EXISTS risk_blockers TEXT DEFAULT '';
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
 END $$;
 
 -- Backfill duration for existing rows based on due date vs creation/assignment
@@ -83,6 +90,9 @@ UPDATE tasks
 -- Carry legacy created_by/created_at into the new auto-populated assigned fields
 UPDATE tasks SET assigned_by = created_by WHERE assigned_by IS NULL AND created_by IS NOT NULL;
 UPDATE tasks SET assigned_at = created_at::date WHERE assigned_at IS NULL AND created_at IS NOT NULL;
+
+-- Creator is immutable; for rows created before this column existed, treat the original assigner as the creator
+UPDATE tasks SET created_by = assigned_by WHERE created_by IS NULL AND assigned_by IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS timesheets (
   id           SERIAL PRIMARY KEY,
