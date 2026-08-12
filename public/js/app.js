@@ -231,6 +231,19 @@
       if (e.key === "Escape") closeModal();
     });
     navigate("dashboard");
+
+    const deepId = Number(new URLSearchParams(window.location.search).get("task"));
+    if (deepId) {
+      (async () => {
+        if (!state.users.length) { try { await refreshUsers(); } catch {} }
+        if (!state.tasks.length) { try { await refreshTasks(); } catch {} }
+        const task = state.tasks.find((t) => t.id === deepId);
+        if (!task) return toast("Task not found", "err");
+        if (state.user.role === "admin" || task.created_by === state.user.username) return openTaskModal(task);
+        if (task.assigned_to === state.user.username) return renderTaskActions(task);
+        return renderViewOnly(task);
+      })();
+    }
   }
 
   const PAGE_META = {
@@ -1019,6 +1032,7 @@
           <div class="form-grid">
             <div class="form-field"><label>Employee ID / Username *</label><input class="input" id="nuUser" placeholder="e.g. GANESH"></div>
             <div class="form-field"><label>Full name *</label><input class="input" id="nuName" placeholder="e.g. Ganesh Kamalapuram"></div>
+            <div class="form-field"><label>Email *</label><input class="input" id="nuEmail" type="email" placeholder="e.g. ganesh@zita.com"></div>
             <div class="form-field"><label>Role</label><select class="select" id="nuRole"><option value="user">User</option><option value="admin">Admin</option></select></div>
           </div>
           <div style="display:flex;justify-content:flex-end;margin-top:16px">
@@ -1044,9 +1058,11 @@
             <div class="user-card-info">
               <div class="user-card-name">${esc(u.name)} ${u.username === state.user.username ? '<span style="color:var(--primary);font-size:11px">(you)</span>' : ""}</div>
               <div class="user-card-uname">${esc(u.username)} · <span style="text-transform:capitalize;color:${u.role === "admin" ? "var(--primary-dark)" : "var(--muted)"}">${u.role}</span></div>
+              ${u.email ? `<div class="user-card-uname" style="color:var(--muted)">${esc(u.email)}</div>` : ""}
             </div>
             ${isAdmin
               ? `<div class="row-actions">
+                  <button class="icon-btn" title="Edit member" onclick="__plm.editUser('${esc(u.username)}','${esc(u.name)}','${esc(u.email || "")}','${u.role}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
                   <button class="icon-btn" title="Reset password" onclick="__plm.resetPw('${esc(u.username)}','${esc(u.name)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 17a2 2 0 100-4 2 2 0 000 4z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h.09a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.09a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
                   <button class="icon-btn danger" title="Delete user" onclick="__plm.delUser('${esc(u.username)}','${esc(u.name)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
                 </div>` : ""}
@@ -1061,10 +1077,12 @@
       create.addEventListener("click", async () => {
         const username = $("#nuUser").value.trim();
         const name = $("#nuName").value.trim();
+        const email = $("#nuEmail").value.trim();
         const role = $("#nuRole").value;
         if (!username || !name) return toast("Username and name are required", "err");
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Please enter a valid email address", "err");
         try {
-          await api("/api/users", { method: "POST", body: JSON.stringify({ username, name, role }) });
+          await api("/api/users", { method: "POST", body: JSON.stringify({ username, name, email, role }) });
           toast(`User ${username} created — default password is 'Welcome'`);
           renderTeam();
         } catch (e) {
@@ -1078,6 +1096,40 @@
     if (expAT) expAT.addEventListener("click", () => { state.exportTasks = state.tasks; exportTasksExcel(); });
     const expATS = $("#expAllTs");
     if (expATS) expATS.addEventListener("click", () => { state.exportTimesheets = state.timesheets; exportTimesheetsExcel(); });
+
+    window.__plm.editUser = (username, name, email, role) => {
+      openModal(`
+        <div class="modal-head"><h3>Edit ${esc(name)}</h3><button class="modal-x" data-close>✕</button></div>
+        <div class="modal-body">
+          <p style="color:#475569;margin-bottom:14px;font-size:13.5px"><strong>${esc(username)}</strong> — edit their details. Their email is used for task alerts.</p>
+          <div class="form-grid">
+            <div class="form-field full"><label>Full name</label><input class="input" id="euName" value="${esc(name)}"></div>
+            <div class="form-field"><label>Email</label><input class="input" id="euEmail" type="email" value="${esc(email)}"></div>
+            <div class="form-field"><label>Role</label><select class="select" id="euRole"><option value="user" ${role === "user" ? "selected" : ""}>User</option><option value="admin" ${role === "admin" ? "selected" : ""}>Admin</option></select></div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" data-close>Cancel</button>
+            <button class="btn btn-primary" id="euSave">Save changes</button>
+          </div>
+        </div>`);
+      $("#euSave").addEventListener("click", async () => {
+        const body = {
+          name: $("#euName").value.trim(),
+          role: $("#euRole").value,
+          email: $("#euEmail").value.trim(),
+        };
+        if (!body.name) return toast("Name cannot be empty", "err");
+        if (body.email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email)) return toast("Please enter a valid email address", "err");
+        try {
+          await api("/api/users/" + username, { method: "PATCH", body: JSON.stringify(body) });
+          toast("Member updated");
+          closeModal();
+          renderTeam();
+        } catch (e) {
+          toast(e.message, "err");
+        }
+      });
+    };
 
     window.__plm.resetPw = (username, name) =>
       confirmBox({

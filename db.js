@@ -23,6 +23,7 @@ const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS app_users (
   username     TEXT PRIMARY KEY,
   name         TEXT NOT NULL,
+  email        TEXT DEFAULT '',
   password_hash TEXT NOT NULL,
   role         TEXT NOT NULL DEFAULT 'user',
   must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 DO $$ BEGIN
   ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE app_users ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';
 END $$;
 
 -- In-place upgrade for databases created before these columns/renames existed

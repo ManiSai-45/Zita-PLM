@@ -10,6 +10,7 @@ Internal Project Management & Timesheet tool.
 
 - **Admin role** (`ADMIN` / `ADMIN123`) — create users, delete users, reset passwords, assign tasks, full edit on every task, view everyone's timesheets (monitor mode), see everything.
 - **New-user password flow** — every account created by an admin starts with the default password `Welcome` and is forced to set its own password on the very first sign-in (verified against the current password). Resetting a password also re-enables that prompt.
+- **Email alerts** *(optional)* — when a task is assigned to someone, they get an email: *"Hey {name}, you have a task awaiting you"* with task details and a link straight to it. When a task is marked **Completed**, the **creator** gets the "task completed" email. Add/update each member's email under **Team & Users** → edit (pencil) button.
 - **User role** — can create tasks (auto or manual task ID) and assign them to a responsible person. A user who **created** a task gets full edit control over it (title, priority, due date, task type, % complete, comments, etc.). On tasks created by someone else, users can only **change status and add comments** (and only if the task is assigned to them — everything else is read-only).
 - **Tasks tab** with two views:
   - **My work** — kanban board of tasks assigned to / created by you. Open a card → change status (card auto-moves) or add a comment.
@@ -57,8 +58,8 @@ Open **http://localhost:3000** and sign in with `ADMIN` / `ADMIN123`.
 | POST | `/api/login` | public | sign in, returns token + user |
 | GET | `/api/me` | any | current user |
 | GET | `/api/users` | any | list members |
-| POST | `/api/users` | admin | create user (default password `Welcome`, change forced on first sign-in) |
-| PATCH | `/api/users/:username` | admin | rename / change role / reset password (forces change on next sign-in) |
+| POST | `/api/users` | admin | create user (default password `Welcome`, change forced on first sign-in) includes optional `email` |
+| PATCH | `/api/users/:username` | admin | rename / change role / set email / reset password (forces change on next sign-in) |
 | DELETE | `/api/users/:username` | admin | delete user |
 | POST | `/api/me/password` | any | set your own password (verify current password; clears the forced-change flag) |
 | GET | `/api/tasks/next-code` | any | next available task ID |
@@ -96,6 +97,19 @@ The app is a plain Node/Express process that serves the frontend AND the API, so
    `PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, PGSSL=true, TOKEN_SECRET`
    - Grab their values from your local `.env` / Supabase dashboard. Set `TOKEN_SECRET` to a long random string.
    - Save → Render auto-deploys.
+4. **Optional: turn on email alerts (Gmail):**
+   - In your Gmail account: Google Account → **Security → 2-Step Verification** (must be on) → **App passwords** → create one (name it "ZITA PLM") → copy the 16-char password.
+   - Back in Render → Environment, add and set:
+     ```
+     EMAIL_ENABLED = true
+     SMTP_HOST    = smtp.gmail.com
+     SMTP_PORT    = 465
+     SMTP_USER    = your-account@gmail.com
+     SMTP_PASS    = the-16-char-app-password
+     EMAIL_FROM   = your-account@gmail.com
+     APP_URL      = https://your-app.onrender.com
+     ```
+   - Then add each team member's email under **Team & Users → edit (pencil)**. Emails are disabled by default — leave `EMAIL_ENABLED` unset or `false` and nothing changes for the team.
 4. **First boot** — Render runs `npm start` → `initSchema()` creates/upgrades the tables automatically. Open the generated `https://zita-plm.onrender.com`, sign in with `ADMIN / ADMIN123`, and change the password.
 
 Notes:

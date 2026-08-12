@@ -4,6 +4,7 @@ const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
 const { query, initSchema } = require("./db");
+const mailer = require("./mailer");
 require("dotenv").config();
 
 const app = express();
@@ -68,6 +69,72 @@ function auth(adminOnly = false) {
 
 const asyncWrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+/* --------------------------- task notification emails --------------------------- */
+
+function lookupUser(username) {
+  if (!username) return Promise.resolve(null);
+  return query("SELECT username, name, email FROM app_users WHERE username = $1", [username]).then((r) => r.rows[0] || null);
+}
+
+function taskLink(task) {
+  return `${mailer.appUrl()}/app.html?task=${encodeURIComponent(task.id)}`;
+}
+
+function notifyAssigned(task, assignerName) {
+  if (!task.assigned_to) return;
+  lookupUser(task.assigned_to).then((u) => {
+    if (!u || !u.email) {
+      console.log(`[notify] no email for ${task.assigned_to} — assignment email skipped`);
+      return;
+    }
+    const due = task.due_date ? `Due: <b>${task.due_date}</b>` : "No due date set";
+    const subject = `New task assigned to you — ${task.task_code} · ${task.title}`;
+    mailer
+      .send({
+        to: u.email,
+        subject,
+        html: mailer.wrap(`
+          <h2 style="margin:0 0 8px;font-size:19px">Hey ${mailer.esc(u.name)},</h2>
+          <p style="margin:0 0 18px;color:#475569;line-height:1.6">${mailer.esc(assignerName || "A teammate")} has assigned a new task to you. It's waiting for you in ZITA PLM.</p>
+          <table style="width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:18px">
+            <tr><td style="padding:6px 0;color:#64748b;width:110px">Task</td><td style="padding:6px 0"><b>${mailer.esc(task.task_code)}</b> · ${mailer.esc(task.title)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b">Type</td><td style="padding:6px 0">${mailer.esc(task.task_type || "—")}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b">Priority</td><td style="padding:6px 0">${mailer.esc(task.priority)}</td></tr>
+            <tr><td style="padding:6px 0;color:#64748b">Due</td><td style="padding:6px 0">${due}</td></tr>
+          </table>
+          <p style="margin:0 0 22px;color:#475569;line-height:1.6">Small steps every day add up to big results — dive in whenever you're ready. 💪</p>
+          <a href="${mailer.esc(taskLink(task))}" style="display:inline-block;background:#4338ca;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px">Open task →</a>
+          <p style="font-size:12px;color:#94a3b8;margin-top:16px">If the button doesn't work, open this link: ${mailer.esc(taskLink(task))}</p>
+        `),
+      })
+      .catch((e) => console.error("[notify] assignment email failed", e.message));
+  }).catch((e) => console.error("[notify] user lookup failed", e.message));
+}
+
+function notifyCompleted(task, completerName) {
+  const creator = task.created_by || task.assigned_by;
+  if (!creator) return;
+  lookupUser(creator).then((u) => {
+    if (!u || !u.email) {
+      console.log(`[notify] no email for ${creator} — completion email skipped`);
+      return;
+    }
+    const subject = `Task completed — ${task.task_code} · ${task.title}`;
+    mailer
+      .send({
+        to: u.email,
+        subject,
+        html: mailer.wrap(`
+          <h2 style="margin:0 0 8px;font-size:19px">Hey ${mailer.esc(u.name)},</h2>
+          <p style="margin:0 0 18px;color:#475569;line-height:1.6">${mailer.esc(completerName || "A team member")} has marked your task <b>${mailer.esc(task.task_code)} · ${mailer.esc(task.title)}</b> as <b>Completed</b> ✅. Great work — one more off the list!</p>
+          <a href="${mailer.esc(taskLink(task))}" style="display:inline-block;background:#4338ca;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px">View task →</a>
+          <p style="font-size:12px;color:#94a3b8;margin-top:16px">If the button doesn't work, open this link: ${mailer.esc(taskLink(task))}</p>
+        `),
+      })
+      .catch((e) => console.error("[notify] completion email failed", e.message));
+  }).catch((e) => console.error("[notify] user lookup failed", e.message));
+}
+
 /* --------------------------------- routes --------------------------------- */
 
 app.get("/api/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
@@ -104,7 +171,7 @@ app.get(
   "/api/users",
   auth(),
   asyncWrap(async (req, res) => {
-    const r = await query("SELECT username, name, role, must_change_password, created_at FROM app_users ORDER BY name");
+    const r = await query("SELECT username, name, email, role, must_change_password, created_at FROM app_users ORDER BY name");
     res.json(r.rows);
   })
 );
@@ -113,18 +180,19 @@ app.post(
   "/api/users",
   auth(true),
   asyncWrap(async (req, res) => {
-    const { username, name, role } = req.body || {};
+    const { username, name, role, email } = req.body || {};
     if (!username || !name) return res.status(400).json({ error: "username and name are required" });
     const uname = String(username).trim().toUpperCase();
     const r = await query("SELECT 1 FROM app_users WHERE username = $1", [uname]);
     if (r.rowCount) return res.status(409).json({ error: "User already exists" });
-    await query("INSERT INTO app_users (username, name, role, password_hash, must_change_password) VALUES ($1,$2,$3,$4,TRUE)", [
+    await query("INSERT INTO app_users (username, name, email, role, password_hash, must_change_password) VALUES ($1,$2,$3,$4,$5,TRUE)", [
       uname,
       name.trim(),
+      String(email || "").trim(),
       role === "admin" ? "admin" : "user",
       hashPassword(DEFAULT_PASSWORD),
     ]);
-    res.status(201).json({ username: uname, name: name.trim(), role: role === "admin" ? "admin" : "user", must_change_password: true });
+    res.status(201).json({ username: uname, name: name.trim(), email: String(email || "").trim(), role: role === "admin" ? "admin" : "user", must_change_password: true });
   })
 );
 
@@ -143,12 +211,13 @@ app.patch(
   "/api/users/:username",
   auth(true),
   asyncWrap(async (req, res) => {
-    const { name, role, password } = req.body || {};
+    const { name, role, password, email } = req.body || {};
     const uname = String(req.params.username).toUpperCase();
     const fields = [];
     const params = [];
     if (name) { params.push(name.trim()); fields.push(`name = $${params.length}`); }
     if (role) { params.push(role === "admin" ? "admin" : "user"); fields.push(`role = $${params.length}`); }
+    if ("email" in req.body) { params.push(String(email || "").trim()); fields.push(`email = $${params.length}`); }
     if (password) {
       params.push(hashPassword(password));
       fields.push(`password_hash = $${params.length}`);
@@ -280,7 +349,9 @@ app.post(
         b.comments || "",
       ]
     );
-    res.status(201).json(r.rows[0]);
+    const row = r.rows[0];
+    if (row.assigned_to) notifyAssigned(row, req.user.name);
+    res.status(201).json(row);
   })
 );
 
@@ -376,7 +447,16 @@ app.patch(
        LEFT JOIN app_users a ON a.username = t.assigned_to
        LEFT JOIN app_users ab ON ab.username = t.assigned_by
        WHERE t.id = $1`, [id]);
-    res.json(joined.rows[0]);
+    const final = joined.rows[0];
+
+    if (b.assigned_to && String(b.assigned_to).toUpperCase() !== String(task.assigned_to || "").toUpperCase()) {
+      notifyAssigned(final, req.user.name);
+    }
+    if ("status" in b && String(b.status) === "Completed" && String(task.status) !== "Completed") {
+      notifyCompleted(final, req.user.name);
+    }
+
+    res.json(final);
   })
 );
 
