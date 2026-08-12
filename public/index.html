@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in · ZITA PLM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/login.css" />
+</head>
+<body>
+  <div class="auth-bg"></div>
+  <div class="auth-card">
+    <div class="brand">
+      <img src="logo.png" alt="ZITA PLM" class="login-logo" />
+    </div>
+
+    <h2 class="welcome">Welcome back</h2>
+    <p class="subtitle">Sign in to your work space with your credentials.</p>
+
+    <form id="loginForm" autocomplete="on">
+      <label class="field">
+        <span>Username / Employee ID</span>
+        <input type="text" id="username" placeholder="e.g. ADMIN or GANESH" required autocomplete="username" />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <div class="pw-wrap">
+          <input type="password" id="password" placeholder="Enter your password" required autocomplete="current-password" />
+          <button type="button" class="pw-toggle" id="pwToggle" tabindex="-1" aria-label="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </label>
+
+      <div class="error-box" id="loginError" hidden></div>
+
+      <button type="submit" class="btn-primary" id="loginBtn">
+        <span>Sign in</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+    </form>
+
+    <form id="setPwForm" hidden autocomplete="off">
+      <h2 class="welcome" id="setPwTitle">Create your password</h2>
+      <p class="subtitle">This is your first sign-in. Set a password of your own — you'll use it from now on.</p>
+      <label class="field">
+        <span>Current password (default)</span>
+        <input type="password" id="curPassword" required />
+      </label>
+      <label class="field">
+        <span>New password</span>
+        <input type="password" id="newPassword" placeholder="At least 6 characters" required />
+      </label>
+      <label class="field">
+        <span>Confirm new password</span>
+        <input type="password" id="confirmPassword" required />
+      </label>
+      <div class="error-box" id="setPwError" hidden></div>
+      <button type="submit" class="btn-primary" id="setPwBtn"><span>Save &amp; continue</span></button>
+    </form>
+
+    <div class="card-note" id="cardNote">
+      <strong>First time?</strong> Ask your administrator for a username &amp; password. Default admin: <code>ADMIN</code>
+    </div>
+  </div>
+
+  <script>
+    const API = "";
+    const form = document.getElementById("loginForm");
+    const errBox = document.getElementById("loginError");
+    const toggle = document.getElementById("pwToggle");
+    const pw = document.getElementById("password");
+
+    toggle.addEventListener("click", () => {
+      const show = pw.type === "password";
+      pw.type = show ? "text" : "password";
+      toggle.classList.toggle("active", show);
+    });
+
+    function showError(box, msg) {
+      box.textContent = msg;
+      box.hidden = false;
+    }
+
+    function showSetPassword(data) {
+      document.getElementById("loginForm").hidden = true;
+      document.getElementById("cardNote").hidden = true;
+      const f = document.getElementById("setPwForm");
+      f.hidden = false;
+      document.getElementById("curPassword").value = document.getElementById("password").value;
+      document.getElementById("setPwTitle").textContent = "Welcome, " + (data.user.name || data.user.username) + "!";
+      f.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const err = document.getElementById("setPwError");
+        err.hidden = true;
+        const cur = document.getElementById("curPassword").value;
+        const np = document.getElementById("newPassword").value;
+        const cp = document.getElementById("confirmPassword").value;
+        if (np.length < 6) return showError(err, "New password must be at least 6 characters.");
+        if (np !== cp) return showError(err, "New password and confirmation do not match.");
+        const btn = document.getElementById("setPwBtn");
+        btn.disabled = true;
+        btn.querySelector("span").textContent = "Saving…";
+        try {
+          const res = await fetch(`${API}/api/me/password`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + data.token },
+            body: JSON.stringify({ current_password: cur, new_password: np }),
+          });
+          const r = await res.json();
+          if (!res.ok) throw new Error(r.error || "Could not update password");
+          localStorage.setItem("plm_token", data.token);
+          localStorage.setItem("plm_user", JSON.stringify(r.user));
+          window.location.href = "app.html";
+        } catch (err2) {
+          showError(err, err2.message || "Could not reach server.");
+        } finally {
+          btn.disabled = false;
+          btn.querySelector("span").textContent = "Save & continue";
+        }
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      document.getElementById("loginError").hidden = true;
+      const btn = document.getElementById("loginBtn");
+      btn.disabled = true;
+      btn.querySelector("span").textContent = "Signing in…";
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      try {
+        const res = await fetch(`${API}/api/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Login failed");
+        if (data.user && data.user.must_change_password) return showSetPassword(data);
+        localStorage.setItem("plm_token", data.token);
+        localStorage.setItem("plm_user", JSON.stringify(data.user));
+        window.location.href = "app.html";
+      } catch (err) {
+        showError(document.getElementById("loginError"), err.message || "Could not reach server. Is the server running?");
+      } finally {
+        btn.disabled = false;
+        btn.querySelector("span").textContent = "Sign in";
+      }
+    });
+  </script>
+</body>
+</html>
