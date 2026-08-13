@@ -64,8 +64,14 @@ function send({ to, subject, html }) {
     console.warn(`[mailer] no valid recipient for "${subject}"`);
     return Promise.resolve(false);
   }
-  const fromAddr = process.env.EMAIL_FROM || process.env.SMTP_USER || "onboarding@resend.dev";
-  const from = process.env.EMAIL_NAME ? `${process.env.EMAIL_NAME} <${fromAddr}>` : `ZITA PLM <${fromAddr}>`;
+  let from;
+  const customFrom = process.env.EMAIL_FROM;
+  if (customFrom && /<[^>]+@[^>]+>/.test(customFrom)) {
+    from = customFrom;
+  } else {
+    const fromAddr = customFrom || process.env.SMTP_USER || "onboarding@resend.dev";
+    from = process.env.EMAIL_NAME ? `${process.env.EMAIL_NAME} <${fromAddr}>` : `ZITA PLM <${fromAddr}>`;
+  }
 
   if (process.env.RESEND_API_KEY) {
     return sendViaResend({ to, subject, html, from }).then((info) => {
