@@ -43,3 +43,9 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      # Recommended: use Resend REST API instead of SMTP. Render free tier blocks
+      # outbound SMTP (25/465/587) but allows HTTPS. Create a free key at
+      # resend.com -> API Keys, then set RESEND_API_KEY. When present, mailer uses
+      # HTTPS and ignores SMTP_*.
+      - key: RESEND_API_KEY
+        sync: false

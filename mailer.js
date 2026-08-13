@@ -20,7 +20,27 @@ function getTransporter() {
 }
 
 function isEnabled() {
-  return process.env.EMAIL_ENABLED === "true" && !!process.env.SMTP_USER;
+  return process.env.EMAIL_ENABLED === "true" && (!!process.env.SMTP_USER || !!process.env.RESEND_API_KEY);
+}
+
+function sendViaResend({ to, subject, html, from }) {
+  // Render free tier blocks outbound SMTP (25/465/587), so send over HTTPS (443)
+  // via Resend's REST API when RESEND_API_KEY is set.
+  return fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from, to, subject, html }),
+  }).then((res) => {
+    if (!res.ok) {
+      return res.text().then((t) => {
+        throw new Error(`Resend HTTP ${res.status}: ${t}`);
+      });
+    }
+    return res.json();
+  });
 }
 
 function appUrl() {
@@ -44,8 +64,16 @@ function send({ to, subject, html }) {
     console.warn(`[mailer] no valid recipient for "${subject}"`);
     return Promise.resolve(false);
   }
-  const fromAddr = process.env.EMAIL_FROM || process.env.SMTP_USER;
+  const fromAddr = process.env.EMAIL_FROM || process.env.SMTP_USER || "onboarding@resend.dev";
   const from = process.env.EMAIL_NAME ? `${process.env.EMAIL_NAME} <${fromAddr}>` : `ZITA PLM <${fromAddr}>`;
+
+  if (process.env.RESEND_API_KEY) {
+    return sendViaResend({ to, subject, html, from }).then((info) => {
+      console.log(`[mailer] sent "${subject}" -> ${to} (${info.id})`);
+      return true;
+    });
+  }
+
   return getTransporter()
     .sendMail({ from, to, subject, html })
     .then((info) => {
