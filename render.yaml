@@ -26,10 +26,11 @@ services:
         value: "true"
       - key: TOKEN_SECRET
         generateValue: true
-      # Optional email notifications (Gmail SMTP). Leave EMAIL_ENABLED="true" and fill
+      # Optional email notifications (Gmail SMTP). EMAIL_ENABLED must stay "true"
+      # so Blueprint deploys don't switch notifications back off. Fill
       # SMTP_USER/SMTP_PASS (Gmail app password) + APP_URL to enable task emails.
       - key: EMAIL_ENABLED
-        value: "false"
+        value: "true"
       - key: APP_URL
         sync: false
       - key: SMTP_HOST
