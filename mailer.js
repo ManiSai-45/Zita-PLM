@@ -44,7 +44,8 @@ function send({ to, subject, html }) {
     console.warn(`[mailer] no valid recipient for "${subject}"`);
     return Promise.resolve(false);
   }
-  const from = process.env.EMAIL_FROM || process.env.SMTP_USER;
+  const fromAddr = process.env.EMAIL_FROM || process.env.SMTP_USER;
+  const from = process.env.EMAIL_NAME ? `${process.env.EMAIL_NAME} <${fromAddr}>` : `ZITA PLM <${fromAddr}>`;
   return getTransporter()
     .sendMail({ from, to, subject, html })
     .then((info) => {
