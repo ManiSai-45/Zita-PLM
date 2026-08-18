@@ -4,7 +4,6 @@ const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
 const dns = require("dns");
-// Render free instances have no outbound IPv6; prefer IPv4 so Gmail SMTP (465) connects
 dns.setDefaultResultOrder("ipv4first");
 const { query, initSchema } = require("./db");
 const mailer = require("./mailer");

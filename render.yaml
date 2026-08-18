@@ -26,8 +26,7 @@ services:
         value: "true"
       - key: TOKEN_SECRET
         generateValue: true
-      # Optional email notifications (Gmail SMTP). EMAIL_ENABLED must stay "true"
-      # so Blueprint deploys don't switch notifications back off. Fill
+      # Optional email notifications (Gmail SMTP). Leave EMAIL_ENABLED="true" and fill
       # SMTP_USER/SMTP_PASS (Gmail app password) + APP_URL to enable task emails.
       - key: EMAIL_ENABLED
         value: "true"
@@ -42,10 +41,4 @@ services:
       - key: SMTP_PASS
         sync: false
       - key: EMAIL_FROM
-        sync: false
-      # Recommended: use Resend REST API instead of SMTP. Render free tier blocks
-      # outbound SMTP (25/465/587) but allows HTTPS. Create a free key at
-      # resend.com -> API Keys, then set RESEND_API_KEY. When present, mailer uses
-      # HTTPS and ignores SMTP_*.
-      - key: RESEND_API_KEY
         sync: false
