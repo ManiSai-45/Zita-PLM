@@ -16,6 +16,13 @@
     tsFilters: {},
     taskView: "mine", // 'mine' | 'all'
     charts: {},
+    leaveTypes: [],
+    holidays: [],
+    leaves: [],
+    leavesMap: {},
+    settings: {},
+    vacMonth: null,
+    vacTab: "calendar",
   };
 
   /* ---------------- helpers ---------------- */
@@ -24,7 +31,7 @@
 
   const statusColor = (s) => {
     const map = {
-      Pending: ["#6366f1", "#e0e7ff"],
+      Pending: ["#106090", "#e0eef6"],
       "In Progress": ["#0ea5e9", "#e0f2fe"],
       "On Hold": ["#f59e0b", "#fef3c7"],
       Blocked: ["#ef4444", "#fee2e2"],
@@ -251,6 +258,7 @@
     tasks: ["Tasks", "Create, assign and track tasks. Everyone can see the full picture."],
     timesheets: ["Timesheets", "Log your daily work hours per task and domain."],
     team: [state.user?.role === "admin" ? "Team & Users" : "Team", "People working in this workspace."],
+    vacations: ["Vacation Calendar", "Mark your leaves and see everyone's calendar and holidays."],
   };
 
   function navigate(view) {
@@ -263,6 +271,7 @@
     else if (view === "tasks") renderTasks();
     else if (view === "timesheets") renderTimesheets();
     else if (view === "team") renderTeam();
+    else if (view === "vacations") renderVacations();
   }
 
   /* ---------------- dashboard ---------------- */
@@ -289,7 +298,7 @@
         ${statCard(
           "Total tasks",
           summary.totalTasks,
-          ["#6366f1", "#e0e7ff"],
+          ["#106090", "#e0eef6"],
           `<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>`
         )}
         ${statCard(
@@ -313,7 +322,7 @@
         ${statCard(
           "Hours logged",
           summary.hours.total_hours.toFixed(1),
-          ["#8b5cf6", "#ede9fe"],
+          ["#0080a0", "#d9f0f5"],
           `<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`
         )}
         ${statCard(
@@ -417,7 +426,7 @@
       const top = Object.entries(byUser).sort((a, b) => b[1] - a[1]).slice(0, 6);
       state.charts.hours = new Chart(elH, {
         type: "bar",
-        data: { labels: top.map(([k]) => k), datasets: [{ label: "Hours", data: top.map(([, v]) => v), backgroundColor: ["#6366f1", "#8b5cf6", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e"], borderRadius: 8, maxBarThickness: 42 }] },
+        data: { labels: top.map(([k]) => k), datasets: [{ label: "Hours", data: top.map(([, v]) => v), backgroundColor: ["#106090", "#0080a0", "#0891b2", "#0ea5e9", "#10b981", "#f59e0b"], borderRadius: 8, maxBarThickness: 42 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: "#eef1f7" }, ticks: { precision: 0 } } } },
       });
     }
@@ -873,7 +882,7 @@
     view.innerHTML = `
       ${state.user.role === "admin" ? `
         <div class="card" style="padding:20px;display:flex;gap:14px;align-items:center">
-          <div class="stat-icon" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;flex:0 0 44px">
+          <div class="stat-icon" style="background:linear-gradient(135deg,#106090,#0080a0);width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;flex:0 0 44px">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
           </div>
           <div>
@@ -898,8 +907,8 @@
       </div>`}
 
       <div class="stat-grid" style="margin:20px 0">
-        ${statCard("Hours shown", totalHours.toFixed(1), ["#8b5cf6", "#ede9fe"], `<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`)}
-        ${statCard("Entries shown", rows.length, ["#6366f1", "#e0e7ff"], `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>`)}
+        ${statCard("Hours shown", totalHours.toFixed(1), ["#0080a0", "#d9f0f5"], `<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`)}
+        ${statCard("Entries shown", rows.length, ["#106090", "#e0eef6"], `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>`)}
         ${statCard("Days logged", new Set(rows.map((r) => r.entry_date)).size, ["#10b981", "#d1fae5"], `<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`)}
       </div>
 
@@ -1163,6 +1172,406 @@
       });
   }
 
+  /* ---------------- vacation calendar ---------------- */
+  const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+
+  function isoDate(d) {
+    if (!d) return "";
+    if (d instanceof Date) {
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 10);
+    }
+    if (typeof d === "string") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+      const dt = new Date(d);
+      if (!isNaN(dt)) {
+        const local = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000);
+        return local.toISOString().slice(0, 10);
+      }
+      return d.slice(0, 10);
+    }
+    return String(d).slice(0, 10);
+  }
+
+  function fyForDate(date, mmdd) {
+    const [mm, dd] = String(mmdd || "04-01").split("-").map(Number);
+    let start = new Date(date.getFullYear(), mm - 1, dd);
+    if (start > date) start = new Date(date.getFullYear() - 1, mm - 1, dd);
+    return `${start.getFullYear()}-${String((start.getFullYear() + 1) % 100).padStart(2, "0")}`;
+  }
+
+  const typeColor = (name) => {
+    const t = (state.leaveTypes || []).find((x) => x.name === name);
+    return t ? t.color : "#64748b";
+  };
+  const weekendDays = () => {
+    const s = (state.settings || {}).weekend_days || "0,6";
+    return s.split(",").map((x) => Number(x)).filter((n) => !isNaN(n));
+  };
+
+  async function refreshLeaveTypes() { state.leaveTypes = await api("/api/leave-types"); }
+  async function refreshHolidays() { state.holidays = await api("/api/holidays"); }
+  async function refreshSettings() { state.settings = await api("/api/settings"); }
+  async function refreshLeaves(from, to) {
+    state.leaves = await api(`/api/leaves?from=${from}&to=${to}`);
+    state.leavesMap = {};
+    state.leaves.forEach((l) => (state.leavesMap[l.username + "|" + isoDate(l.leave_date)] = l));
+  }
+
+  async function renderVacations() {
+    const view = $("#view");
+    view.innerHTML = spinner();
+    const actions = $("#topbarActions");
+    actions.innerHTML = `
+      <div class="seg" id="vacSeg">
+        <button class="${state.vacTab === "calendar" ? "active" : ""}" data-vt="calendar">Calendar</button>
+        ${state.user.role === "admin" ? `<button class="${state.vacTab === "team" ? "active" : ""}" data-vt="team">Team summary</button>` : ""}
+        ${state.user.role === "admin" ? `<button class="${state.vacTab === "settings" ? "active" : ""}" data-vt="settings">Settings</button>` : ""}
+      </div>`;
+    $$("#vacSeg [data-vt]").forEach((b) => b.addEventListener("click", () => { state.vacTab = b.dataset.vt; renderVacations(); }));
+    await Promise.all([refreshUsers(), refreshLeaveTypes(), refreshHolidays(), refreshSettings()]);
+    if (state.vacTab === "team") await renderVacationTeam();
+    else if (state.vacTab === "settings") renderVacationSettings();
+    else await renderVacationCalendar();
+  }
+
+  function deleteHoliday(id, name, after) {
+    confirmBox({
+      title: "Remove holiday?",
+      message: `<strong>${esc(name || "This holiday")}</strong> will disappear from everyone's calendar immediately.`,
+      yes: "Remove",
+      cb: async () => {
+        try {
+          await api("/api/holidays/" + id, { method: "DELETE" });
+          toast("Holiday removed");
+          (after ? after : renderVacationCalendar)();
+        } catch (e) { toast(e.message, "err"); }
+      },
+    });
+  }
+
+  async function renderVacationCalendar() {
+    const view = $("#view");
+    if (!state.vacMonth) state.vacMonth = new Date();
+    const y = state.vacMonth.getFullYear();
+    const m = state.vacMonth.getMonth();
+    const mm = String(m + 1).padStart(2, "0");
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const from = `${y}-${mm}-01`;
+    const to = `${y}-${mm}-${String(daysInMonth).padStart(2, "0")}`;
+    await refreshLeaves(from, to);
+
+    const holidays = state.holidays.filter((h) => isoDate(h.date).startsWith(`${y}-${mm}`));
+    const holByDate = {};
+    holidays.forEach((h) => (holByDate[isoDate(h.date)] = h));
+    const weekends = weekendDays();
+    const users = state.users.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const editable = (u) => state.user.role === "admin" || u === state.user.username;
+
+    const monthCounts = {};
+    Object.values(state.leavesMap).forEach((l) => {
+      monthCounts[l.username] = monthCounts[l.username] || {};
+      monthCounts[l.username][l.leave_type] = (monthCounts[l.username][l.leave_type] || 0) + (l.half_day ? 0.5 : 1);
+    });
+    const dayTotals = {};
+    state.leaves.forEach((l) => { const d = isoDate(l.leave_date); dayTotals[d] = (dayTotals[d] || 0) + (l.half_day ? 0.5 : 1); });
+
+    const cell = (username, dateStr) => {
+      const rec = state.leavesMap[username + "|" + dateStr];
+      const color = rec ? typeColor(rec.leave_type) : "";
+      const isWk = weekends.includes(new Date(dateStr + "T12:00:00").getDay());
+      if (!editable(username)) {
+        return `<div class="vc-cell vc-readonly${isWk ? " vc-weekend" : ""}" style="${rec ? `background:${color}1f;color:${color};border-color:${color}66` : ""}" title="${rec ? esc(rec.leave_type) + (rec.half_day ? " (half day)" : "") : ""}">${rec ? (rec.half_day ? "½" : "•") : ""}</div>`;
+      }
+      const isAdmin = state.user.role === "admin";
+      const val = rec ? esc(rec.leave_type) + (rec.half_day ? ":half" : "") : "";
+      const opts = [isAdmin ? `<option value=""${val === "" ? " selected" : ""}></option>` : `<option value="" disabled${val === "" ? " selected" : ""}></option>`];
+      state.leaveTypes.forEach((t) => {
+        const v = esc(t.name);
+        opts.push(`<option value="${v}"${val === v ? " selected" : ""}>${esc(t.name)}</option>`);
+        opts.push(`<option value="${v}:half"${val === v + ":half" ? " selected" : ""}>½ ${esc(t.name)}</option>`);
+      });
+      return `<select class="vc-cell${isWk ? " vc-weekend" : ""}" data-u="${esc(username)}" data-d="${dateStr}" style="${rec ? `background:${color}1f;color:${color};border-color:${color}66` : ""}" title="${rec ? esc(rec.leave_type) : ""}">${opts.join("")}</select>`;
+    };
+
+    const totalCol = (u) => {
+      const counts = monthCounts[u.username] || {};
+      const entries = Object.entries(counts).filter(([, v]) => v > 0);
+      const total = entries.reduce((a, [, v]) => a + v, 0);
+      const chips = entries
+        .map(([t, v]) => `<span class="mini-chip" style="color:${typeColor(t)};background:${typeColor(t)}1a">${esc(t)} ${v}</span>`)
+        .join("");
+      return `<div style="font-size:12.5px;margin-bottom:4px">${total ? `<strong>${total}</strong> day${total > 1 ? "s" : ""}` : `<span style="color:var(--muted)">0</span>`}</div><div style="display:flex;flex-wrap:wrap;gap:4px;max-width:170px">${chips}</div>`;
+    };
+
+    const headerCells = [];
+    const dayTotalCells = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${y}-${mm}-${String(day).padStart(2, "0")}`;
+      const hol = holByDate[dateStr];
+      const wk = weekends.includes(new Date(y, m, day).getDay());
+      headerCells.push(`<th class="vc-day${wk ? " vc-we" : ""}" title="${hol ? "Holiday · " + esc(hol.name) : ""}">
+        <div class="vc-num">${day}</div>
+        <div class="vc-dow">${WEEKDAYS[new Date(y, m, day).getDay()]}</div>
+        ${hol ? `<div class="vc-hol-host"><div class="vc-hol" title="${esc(hol.name)}">H</div>${state.user.role === "admin" ? `<button class="vc-hol-del" data-hol="${hol.id}" data-name="${esc(hol.name)}" title="Delete holiday · ${esc(hol.name)}">✕</button>` : ""}</div>` : ""}
+      </th>`);
+      dayTotalCells.push(`<td class="vc-day-total">${dayTotals[dateStr] || ""}</td>`);
+    }
+
+    const rows = users
+      .map((u) => {
+        const cells = [];
+        for (let day = 1; day <= daysInMonth; day++) {
+          cells.push(`<td>${cell(u.username, `${y}-${mm}-${String(day).padStart(2, "0")}`)}</td>`);
+        }
+        return `<tr>
+          <td class="vc-mem">${avatarChip(u.username)}${u.username === state.user.username ? ' <span style="color:var(--primary);font-size:10px">(you)</span>' : ""}</td>
+          ${cells.join("")}
+          <td class="vc-total">${totalCol(u)}</td>
+        </tr>`;
+      })
+      .join("");
+
+    view.innerHTML = `
+      <div class="card" style="padding:16px 18px;margin-bottom:14px">
+        <div class="vc-month-nav">
+          <button class="vc-nav-btn" id="vcPrev">‹</button>
+          <h2>${MONTH_NAMES[m]} ${y}</h2>
+          <button class="vc-nav-btn" id="vcNext">›</button>
+          <button class="vc-nav-btn" id="vcToday">Today</button>
+          <span style="margin-left:auto;color:var(--muted);font-size:12.5px">FY ${fyForDate(state.vacMonth, state.settings.financial_year_start)}</span>
+        </div>
+        <div class="vc-legend">
+          ${state.leaveTypes.map((t) => `<span class="mini-chip"><span class="swatch" style="background:${t.color}"></span>${esc(t.name)} · ${t.monthly_quota}/mo</span>`).join("")}
+          <span class="mini-chip"><span class="swatch" style="background:#ef4444"></span>Holiday</span>
+          <span class="mini-chip"><span class="swatch" style="background:#eef1f8"></span>Weekend</span>
+        </div>
+        <div class="vc-holiday-note">${holidays.length ? `<strong>Holidays:</strong> ${holidays.map((h) => `${isoDate(h.date)} · ${esc(h.name)}`).join("  ·  ")}` : "No holidays this month."}</div>
+        ${state.user.role !== "admin" ? `<div class="vc-holiday-note" style="margin-top:4px">Pick a leave type in your row below to mark that day. To un-mark a day, ask your admin — only admins can clear leaves.</div>` : `<div class="vc-holiday-note" style="margin-top:4px">Pick the blank entry in any member's cell to delete that leave.</div>`}
+      </div>
+      ${users.length ? `
+      <div class="card table-wrap">
+        <table class="vc-table">
+          <thead><tr>
+            <th class="vc-mem">Member</th>
+            ${headerCells.join("")}
+            <th class="vc-total-th">Month leaves</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr>
+            <td class="vc-mem" style="font-weight:700">All members</td>
+            ${dayTotalCells.join("")}
+            <td class="vc-total" style="font-weight:700;color:var(--primary-dark)"></td>
+          </tr></tfoot>
+        </table>
+      </div>` : empty("No members yet", "Add users from the Team tab first.")}
+    `;
+
+    $("#vcPrev").addEventListener("click", () => { state.vacMonth = new Date(y, m - 1, 1); renderVacationCalendar(); });
+    $("#vcNext").addEventListener("click", () => { state.vacMonth = new Date(y, m + 1, 1); renderVacationCalendar(); });
+    $("#vcToday").addEventListener("click", () => { state.vacMonth = new Date(); renderVacationCalendar(); });
+    $$("#view .vc-cell").forEach((el) => el.addEventListener("change", () => setVacCell(el.dataset.u, el.dataset.d, el.value)));
+    $$("#view [data-hol]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); deleteHoliday(b.dataset.hol, b.dataset.name); }));
+  }
+
+  async function setVacCell(username, dateStr, value) {
+    let leave_type = "";
+    let half_day = false;
+    if (value) {
+      const idx = value.indexOf(":half");
+      if (idx > -1) { leave_type = value.slice(0, idx); half_day = true; }
+      else leave_type = value;
+    }
+    if (!leave_type && state.user.role !== "admin") {
+      toast("Removing a leave is admin-only — ask your admin to clear it", "err");
+      return renderVacationCalendar();
+    }
+    try {
+      await api("/api/leaves", { method: "PUT", body: JSON.stringify({ username, leave_date: dateStr, leave_type, half_day }) });
+      toast(leave_type ? `Marked ${leave_type}${half_day ? " (half-day)" : ""} on ${fmtDate(dateStr)}` : `Cleared ${fmtDate(dateStr)}`);
+      await renderVacationCalendar();
+    } catch (e) {
+      toast(e.message, "err");
+    }
+  }
+
+  async function renderVacationTeam() {
+    const view = $("#view");
+    view.innerHTML = spinner();
+    const s = await api("/api/vacation/summary");
+    const totals = s.users.reduce((a, u) => a + u.total_taken, 0);
+    const noLeave = s.users.filter((u) => u.total_taken === 0);
+    const typeNames = s.users[0] ? s.users[0].types.map((t) => t.name) : [];
+
+    view.innerHTML = `
+      <div class="stat-grid">
+        ${statCard("Financial year", s.fy_label, ["#106090", "#e0eef6"], `<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`)}
+        ${statCard("Months elapsed", s.months_elapsed, ["#0080a0", "#d9f0f5"], `<path d="M12 7v5l3 3"/>`)}
+        ${statCard("Leave days taken", totals.toFixed(1), ["#f59e0b", "#fef3c7"], `<path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 01-8 0"/>`)}
+        ${statCard("Members", s.users.length, ["#10b981", "#d1fae5"], `<path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/>`)}
+      </div>
+
+      <div style="color:var(--muted);font-size:12.5px;margin:-8px 0 18px">FY <strong style="color:var(--slate)">${s.fy_label}</strong> runs <strong style="color:var(--slate)">${s.fy_start}</strong> → <strong style="color:var(--slate)">${s.fy_end}</strong>. Quota so far = ${s.months_elapsed} × monthly free allocation per member.</div>
+
+      <div class="section-head"><div><h2>Leave balance · ${s.fy_label}</h2><p>Monthly free allocation accumulated, leaves taken, and what each member has left.</p></div></div>
+      <div class="card table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Member</th>${typeNames.map((t) => `<th>${esc(t)}</th>`).join("")}<th>Total taken</th><th>Status</th></tr></thead>
+          <tbody>
+            ${s.users.map((u) => `<tr>
+              <td>${avatarChip(u.username)}</td>
+              ${u.types.map((t) => {
+                const pct = t.quota > 0 ? Math.max(0, Math.min(100, (t.taken / t.quota) * 100)) : 0;
+                return `<td>
+                  <div style="display:flex;gap:6px;align-items:baseline"><strong style="color:${t.remaining < 0 ? "var(--red)" : t.color}">${t.remaining.toFixed(1)}</strong><span style="font-size:11px;color:var(--muted)">of ${t.quota.toFixed(1)}</span></div>
+                  <div style="width:84px;height:5px;border-radius:99px;background:#eef1f7;margin-top:5px"><div style="width:${pct}%;height:100%;border-radius:99px;background:${t.color}"></div></div>
+                  <div style="font-size:10.5px;color:var(--muted);margin-top:2px">taken ${t.taken.toFixed(1)}</div>
+                </td>`; }).join("")}
+              <td><strong>${u.total_taken.toFixed(1)}</strong></td>
+              <td>${u.total_taken === 0 ? badge("No leave taken", ["#64748b", "#eef1f7"]) : u.types.some((t) => t.remaining < 0) ? badge("Over quota", ["#ef4444", "#fee2e2"]) : badge("On track", ["#10b981", "#d1fae5"])}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section-head" style="margin-top:24px"><div><h2>Members with no leaves yet (${noLeave.length})</h2><p>Nobody from this list has claimed any leave in ${s.fy_label}.</p></div></div>
+      <div class="card" style="padding:18px 20px">
+        ${noLeave.length ? `<div style="display:flex;flex-wrap:wrap;gap:10px">${noLeave.map((u) => `<span class="mini-chip">${esc(u.name)}</span>`).join("")}</div>` : `<span style="color:var(--muted)">Everyone has taken at least one leave day so far.</span>`}
+      </div>
+    `;
+  }
+
+  function renderVacationSettings() {
+    const view = $("#view");
+    const fy = String((state.settings || {}).financial_year_start || "04-01");
+    const weekend = weekendDays();
+
+    view.innerHTML = `
+      <div class="section-head"><div><h2>Financial year & working days</h2><p>Your leave year configuration. Everyone's quota accumulates monthly from the start date.</p></div></div>
+      <div class="card" style="padding:20px;margin-bottom:20px">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Financial year start</label>
+            <input class="input" id="setFy" value="${esc(fy)}" placeholder="MM-DD e.g. 04-01" maxlength="5">
+            <span class="hint">Format MM-DD. Free leave days accumulate from this date each year.</span>
+          </div>
+          <div class="form-field">
+            <label>Weekend days</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+              ${WEEKDAYS.map((w, i) => `<label class="mini-chip" style="cursor:pointer;${weekend.includes(i) ? "background:var(--primary-soft);color:var(--primary-dark)" : ""}"><input type="checkbox" data-wd="${i}" ${weekend.includes(i) ? "checked" : ""} style="margin-right:4px">${w}</label>`).join("")}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-primary" id="setSave">Save settings</button></div>
+      </div>
+
+      <div class="section-head"><div><h2>Leave types</h2><p>Days each member gets free per month, per type — shown in the calendar legend and used for balances.</p></div></div>
+      <div class="card" style="padding:20px;margin-bottom:20px">
+        <div class="vc-list">
+          ${state.leaveTypes.map((t) => `
+            <div class="vc-row">
+              <input type="color" class="vc-color" data-k="color" value="${esc(t.color)}">
+              <span class="grow"><strong>${esc(t.name)}</strong></span>
+              <label style="font-size:12px;color:var(--muted)">days/month
+                <input type="number" class="input vc-quota" data-k="quota" value="${t.monthly_quota}" min="0" step="0.5">
+              </label>
+              <button class="icon-btn" title="Save type" data-save="${t.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></button>
+              <button class="icon-btn danger" title="Delete type" data-del="${t.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+            </div>`).join("")}
+          <div class="vc-row">
+            <input type="color" class="vc-color" id="ltNewColor" value="#106090">
+            <input class="input" id="ltNewName" placeholder="New leave type name" style="flex:1">
+            <label style="font-size:12px;color:var(--muted)">days/month
+              <input type="number" class="input vc-quota" id="ltNewQuota" value="1" min="0" step="0.5">
+            </label>
+            <button class="btn btn-primary btn-sm" id="ltNewAdd">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-head"><div><h2>Holidays</h2><p>Holidays appear on everyone's calendar with a red badge.</p></div></div>
+      <div class="card" style="padding:20px">
+        <div class="vc-row" style="padding:0;border:0;background:transparent">
+          <input class="input" id="holName" placeholder="Holiday name, e.g. Diwali" style="flex:1">
+          <input type="date" class="input" id="holDate" style="width:180px">
+          <button class="btn btn-primary btn-sm" id="holAdd">Add holiday</button>
+        </div>
+        <div class="vc-list" style="margin-top:14px">
+          ${state.holidays.length ? state.holidays.map((h) => `
+            <div class="vc-row">
+              <span class="mini-chip" style="background:#fee2e2;color:#dc2626"><span class="dot" style="background:#ef4444"></span>${esc(isoDate(h.date))}</span>
+              <span class="grow"><strong>${esc(h.name)}</strong></span>
+              <button class="icon-btn danger" title="Delete holiday" data-hol="${h.id}" data-name="${esc(h.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>
+            </div>`).join("") : `<div style="color:var(--muted);font-size:13px">No holidays yet — add the first one above.</div>`}
+        </div>
+      </div>
+    `;
+
+    $("#setSave").addEventListener("click", async () => {
+      const fyVal = $("#setFy").value.trim();
+      if (!/^\d{2}-\d{2}$/.test(fyVal)) return toast("Financial year start must be MM-DD (e.g. 04-01)", "err");
+      const wd = $$("[data-wd]").filter((c) => c.checked).map((c) => c.dataset.wd);
+      if (!wd.length) return toast("Keep at least one weekday as a working day", "err");
+      try {
+        await api("/api/settings", { method: "PUT", body: JSON.stringify({ financial_year_start: fyVal, weekend_days: wd.join(",") }) });
+        toast("Settings saved");
+        renderVacationSettings();
+      } catch (e) { toast(e.message, "err"); }
+    });
+
+    $$("[data-save]").forEach((b) => b.addEventListener("click", async () => {
+      const row = b.closest(".vc-row");
+      const body = {
+        color: row.querySelector('[data-k="color"]').value,
+        monthly_quota: Number(row.querySelector('[data-k="quota"]').value),
+      };
+      try {
+        await api("/api/leave-types/" + b.dataset.save, { method: "PATCH", body: JSON.stringify(body) });
+        toast("Leave type updated");
+        renderVacationSettings();
+      } catch (e) { toast(e.message, "err"); }
+    }));
+
+    $$("[data-del]").forEach((b) => b.addEventListener("click", () => {
+      confirmBox({
+        title: "Delete leave type?",
+        message: "Existing calendar entries keep their label, but the type will no longer be offered.",
+        yes: "Delete",
+        cb: async () => {
+          try {
+            await api("/api/leave-types/" + b.dataset.del, { method: "DELETE" });
+            toast("Leave type deleted");
+            renderVacationSettings();
+          } catch (e) { toast(e.message, "err"); }
+        },
+      });
+    }));
+
+    $("#ltNewAdd").addEventListener("click", async () => {
+      const name = $("#ltNewName").value.trim();
+      if (!name) return toast("Name the new leave type", "err");
+      try {
+        await api("/api/leave-types", { method: "POST", body: JSON.stringify({ name, monthly_quota: Number($("#ltNewQuota").value) || 0, color: $("#ltNewColor").value }) });
+        toast("Leave type added");
+        renderVacationSettings();
+      } catch (e) { toast(e.message, "err"); }
+    });
+
+    $("#holAdd").addEventListener("click", async () => {
+      const name = $("#holName").value.trim();
+      const date = $("#holDate").value;
+      if (!name || !date) return toast("Holiday name and date are required", "err");
+      try {
+        await api("/api/holidays", { method: "POST", body: JSON.stringify({ name, date }) });
+        toast("Holiday added");
+        renderVacationSettings();
+      } catch (e) { toast(e.message, "err"); }
+    });
+
+    $$("[data-hol]").forEach((b) => b.addEventListener("click", () => deleteHoliday(b.dataset.hol, b.dataset.name, renderVacationSettings)));
+  }
+
   /* ---------------- data loading ---------------- */
   async function refreshTasks() {
     state.tasks = await api("/api/tasks");
@@ -1176,7 +1585,7 @@
   }
 
   function spinner() {
-    return `<div class="empty"><div style="width:34px;height:34px;border:3px solid #e0e7ff;border-top-color:#6366f1;border-radius:50%;margin:0 auto 14px;animation:spin 1s linear infinite"></div><p>Loading…</p></div>`;
+    return `<div class="empty"><div style="width:34px;height:34px;border:3px solid #e0eef6;border-top-color:#106090;border-radius:50%;margin:0 auto 14px;animation:spin 1s linear infinite"></div><p>Loading…</p></div>`;
   }
 
   function badge(text, [c, bg], noDot = false) {
