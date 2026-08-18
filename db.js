@@ -111,6 +111,57 @@ CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_timesheets_user ON timesheets(username);
 CREATE INDEX IF NOT EXISTS idx_timesheets_date ON timesheets(entry_date);
+
+-- Vacation / leave calendar
+CREATE TABLE IF NOT EXISTS leave_types (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL UNIQUE,
+  monthly_quota NUMERIC(6,2) NOT NULL DEFAULT 0,
+  color        TEXT NOT NULL DEFAULT '#106090',
+  active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS holidays (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  date         DATE NOT NULL UNIQUE,
+  created_by   TEXT REFERENCES app_users(username) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS leaves (
+  id           SERIAL PRIMARY KEY,
+  username     TEXT NOT NULL REFERENCES app_users(username) ON DELETE CASCADE,
+  leave_date   DATE NOT NULL,
+  leave_type   TEXT NOT NULL,
+  half_day     BOOLEAN NOT NULL DEFAULT FALSE,
+  note         TEXT DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (username, leave_date)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key          TEXT PRIMARY KEY,
+  value        TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_leaves_user ON leaves(username);
+CREATE INDEX IF NOT EXISTS idx_leaves_date ON leaves(leave_date);
+CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(date);
+
+INSERT INTO settings (key, value) VALUES ('financial_year_start', '04-01') ON CONFLICT (key) DO NOTHING;
+INSERT INTO settings (key, value) VALUES ('weekend_days', '0,6') ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO leave_types (name, monthly_quota, color)
+SELECT v.name, v.monthly_quota, v.color
+FROM (VALUES
+  ('Sick Leave', 1.5, '#0ea5e9'),
+  ('Casual Leave', 1.0, '#10b981'),
+  ('Paid Leave', 2.0, '#f59e0b')
+) AS v(name, monthly_quota, color)
+WHERE NOT EXISTS (SELECT 1 FROM leave_types);
 `;
 
 async function initSchema() {
